@@ -80,7 +80,8 @@ class Protocol_TCP:
                 destination_post= HeaderTCP.get( HeaderTCP.KEYW_SOURCE, msg),
                 sequence_number=HeaderTCP.get( HeaderTCP.KEYW_ACK, msg) + 1,
                 ack_number= HeaderTCP.get( HeaderTCP.KEYW_SEQUENCE, msg),
-                flacks= Protocol_TCP.ACK
+                flacks= Protocol_TCP.ACK,
+                windows_size= HeaderTCP.get( HeaderTCP.KEYW_SIZE_W, msg)
             )
     @staticmethod
     def normal_sms( msg) -> HeaderTCP:

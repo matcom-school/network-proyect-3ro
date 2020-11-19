@@ -7,10 +7,10 @@ import time
 
 from random import randint
 def tester( bites ):
-    #return bites
-    i = randint(0,100)
-    if i % 3 == 0: return b"$aniel" + bites
-    else: return bites
+    return bites
+    #i = randint(0,100)
+    #if i % 3 == 0: return b"$aniel" + bites
+    #else: return bites
 
 class MySocket:
     def __init__( self, directions):

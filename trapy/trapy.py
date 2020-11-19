@@ -25,6 +25,7 @@ class Conn:
         self.try_connection = 0
         self.top_try_conn = top_try_conn
         self.dict_seqnum_responce = {}
+        self.end_sys = None
 
     def demultiplexing( self, response: bytes) -> bool:
         source = HeaderTCP.get( HeaderTCP.KEYW_SOURCE, response)
@@ -55,11 +56,12 @@ class Conn:
         sender = MySocket( self.address ) 
         receiver = MySocket( self.address )
         for _ in range(5):
-            print("aaaa")
             sender.send( msg_to_send)
             try:
-                wait_for(receiver.recv( blocking= False))
-                print(HeaderTCP.to_str(receiver.data))
+                #wait_for(receiver.recv( blocking= False))
+                timeout, resp = receiver.recv_all_windows(0,1)
+                if timeout: raise TimeoutError
+                receiver.data = resp[0]
                 if self.is_good_response( receiver.data, flacks_to_checking):
                     if do_answer:
                         responce = Protocol_TCP.map_flack_to_response( receiver.data ).compose()
@@ -135,7 +137,7 @@ class Conn:
             raise ConnException("Server is down")
         
         self.try_connection += 1
-        print(f'Trying number {self.try_connection} to reconnecting ')
+        logger.info(f'Trying number {self.try_connection} to reconnecting ')
 
 class ConnException(Exception):
     pass
@@ -196,6 +198,7 @@ def dial(address) -> Conn:
         error_msg = f"ConnectingError Server {address} not responce",
         do_answer= True
     )
+    conn.end_sys = Protocol_TCP.map_flack_to_response( response ).compose()
 
     print("Connected !!!!!!!!")
     header_resp,_ = HeaderTCP.descompose(response)
@@ -218,7 +221,7 @@ def send(conn: Conn, data: bytes) -> int:
             msg.windows_size = conn.windows_size
             msg.ack_number = _len
             msg = msg.compose( msg.data )
-            print(HeaderTCP.to_str(msg))
+            #print(HeaderTCP.to_str(msg))
             sockett.send(msg)
     
         timeout, recv_list = sockett.recv_all_windows( 0, conn.windows_size)
@@ -256,7 +259,11 @@ def recv(conn: Conn, length: int) -> bytes:
             if any(recv_list):
                 conn.try_connection = 0
                 break
+            if conn.end_sys:
+                sockett.send( conn.end_sys )
             conn.try_if_cant_close()    
+        
+        conn.end_sys = None
 
         temp = []
         for msg in recv_list:
@@ -270,7 +277,6 @@ def recv(conn: Conn, length: int) -> bytes:
                 continue
             elif not _len : 
                 _len = HeaderTCP.get( HeaderTCP.KEYW_ACK, temp[0])
-                print(_len)
         
         recv_list = temp
         ws = len(recv_list)
@@ -308,4 +314,5 @@ def close(conn: Conn):
         error_msg = f"ConnectingError Client not responce for closed"
     )
 
+    print("Closed connection with", conn.inner_header_tcp.destination_post)
     return conn

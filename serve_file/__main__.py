@@ -1,7 +1,8 @@
 #! /usr/bin/env python
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from threading import Semaphore
 
 from trapy import listen, accept, dial, recv, send, close
 
@@ -25,9 +26,8 @@ def chunked_file(file_path, chunk_size):
 
 
 def handle(conn, file_path, chunk_size):
-    #for chunk in chunked_file(file_path, chunk_size):
-    for chunk in ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii"]:
-        send(conn, chunk[:40])
+    for chunk in chunked_file(file_path, chunk_size):
+        send(conn, chunk)
     close(conn)
 
 
@@ -35,16 +35,20 @@ def make_server(address, file_path, chunk_size):
     logger.info('server running')
 
     executor = ThreadPoolExecutor()
+    workes = Semaphore()
     connections = []
 
     server = listen(address)
 
     while True:
         try:
+            #workes.acquire()
             conn = accept(server)
-            future = executor.submit(handle, conn, file_path, chunk_size)
+            #workes.release()
+            future = executor.submit(handle,conn,file_path,chunk_size)
+            print("continue")
 
-            connections.append((conn, future))
+            connections.append((conn,future))
         except KeyboardInterrupt:
             logger.info('closing server')
             break
@@ -53,7 +57,6 @@ def make_server(address, file_path, chunk_size):
 
     logger.info('releasing resources')
     executor.shutdown(True)
-
 
 def make_client(address, file_path):
     logger.info('client running')
@@ -87,7 +90,7 @@ def main():
     if args.dial:
         make_client(args.dial, args.file)
     elif args.accept:
-        make_server(args.accept, args.file, args.chunk_size)
+        make_server(args.accept, args.file, int(args.chunk_size))
     else:
         logger.error('you must specify one of dial or accept')
 

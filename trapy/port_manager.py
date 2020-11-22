@@ -22,6 +22,7 @@ class PortManager():
             r = randint(0,self.top)        
             if not r in self.port_on: 
                 self.port_on.append(r)
+                self.write()
                 return r
 
     def free(self,port):
@@ -32,6 +33,7 @@ class PortManager():
         if port in self.port_on:
             raise ConnectionError
         self.port_on.append(port)
+        self.write()
 
     def write(self):
         f = open( self.file, "w")

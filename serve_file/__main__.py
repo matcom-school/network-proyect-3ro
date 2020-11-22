@@ -35,7 +35,7 @@ def make_server(address, file_path, chunk_size):
     logger.info('server running')
 
     executor = ThreadPoolExecutor()
-    workes = Semaphore()
+    #workes = Semaphore()
     connections = []
 
     server = listen(address)
@@ -46,17 +46,18 @@ def make_server(address, file_path, chunk_size):
             conn = accept(server)
             #workes.release()
             future = executor.submit(handle,conn,file_path,chunk_size)
-            print("continue")
 
             connections.append((conn,future))
         except KeyboardInterrupt:
             logger.info('closing server')
             break
+
         except Exception as e:
             logger.exception(e)
 
     logger.info('releasing resources')
     executor.shutdown(True)
+    server.close()
 
 def make_client(address, file_path):
     logger.info('client running')

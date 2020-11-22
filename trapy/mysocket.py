@@ -13,19 +13,23 @@ def tester( bites ):
     #else: return bites
 
 class MySocket:
-    def __init__( self, directions):
+    def __init__( self, sender_directions = None, receiver_directions = None):
         self.data = ""
-        self.directions = directions
+        self.sender_directions = sender_directions
+        self.receiver_directions = receiver_directions
+        self.s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
 
     def recv( self, datasize : int = 0, blocking: bool = True):
         self.s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
         self.s.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
-        self.s.bind( self.directions )
+        self.s.bind( self.receiver_directions )
+
         size = HeaderTCP.size()
         if blocking: 
-            result = self.s.recvfrom(20 + size + datasize)[0][20:] 
+            result, direct = self.s.recvfrom(20 + size + datasize)
+            if self.sender_directions is None: self.sender_directions = direct
             self.s.close()
-            return tester(result)
+            return tester(result[20:])
 
         self.s.setblocking(0)
         def a ():
@@ -36,10 +40,10 @@ class MySocket:
                 return False
         return a
 
-    def recv_all_windows(self, lengh, window_size, timeout = 3):
+    def recv_all_windows(self, lengh, window_size, timeout = 3, ws = True):
         s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
         s.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
-        s.bind( self.directions )
+        s.bind( self.receiver_directions )
         s.setblocking(0)
         size = HeaderTCP.size()
     
@@ -47,7 +51,7 @@ class MySocket:
         result = [] 
         while True:
             tc = time.time()
-            if window_size == -1 and any(result):
+            if ws and window_size == -1 and any(result):
                 try:
                     window_size = HeaderTCP.get( HeaderTCP.KEYW_SIZE_W, result[0] )
                 except OverflowError:
@@ -65,28 +69,25 @@ class MySocket:
 
     def send(self, packet):
         s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
-        s.sendto(packet, self.directions)
+        s.sendto(packet, self.sender_directions)
         s.close()
+
     def close(self):
         self.s.close()
 
-
-    @staticmethod
-    def send_and_wait_to_response( directions ,msg, timer = 3, amount_try = 5, error_msg = "" ):
-        sender = MySocket(directions)
-        receiver = MySocket(directions)
+    def send_and_wait_to_response(self, msg, timer = 3, amount_try = 5, error_msg = "" ):
         count = 0
         while True:
-            sender.send( msg)
+            self.send( msg)
             try:
-                wait_for(receiver.recv( blocking= False) , timeout= timer)
+                wait_for(self.recv( blocking= False) , timeout= timer)
                 break
             except TimeoutError:
                 count += 1
                 if count == amount_try:
                     raise TimeoutError(error_msg)
         
-        return receiver.data
+        return self.data
 
 if __name__ == "__main__":
     s = MySocket(("localhost",0))

@@ -26,6 +26,7 @@ class Conn:
         self.top_try_conn = top_try_conn
         self.dict_seqnum_responce = {}
         self.end_sys = None
+        self.sockett = MySocket( receiver_directions= myaddress )
 
     def demultiplexing( self, response: bytes) -> bool:
         source = HeaderTCP.get( HeaderTCP.KEYW_SOURCE, response)
@@ -53,24 +54,22 @@ class Conn:
         else: self.windows_size = len(self.list_msg)
     
     def send_and_wait_response(self, msg_to_send, flacks_to_checking , error_msg, do_answer = False):
-        sender = MySocket( self.address ) 
-        receiver = MySocket( self.address )
         for _ in range(5):
-            sender.send( msg_to_send)
+            self.sockett.send( msg_to_send)
             try:
                 #wait_for(receiver.recv( blocking= False))
-                timeout, resp = receiver.recv_all_windows(0,1)
+                timeout, resp = self.sockett.recv_all_windows(0,1)
                 if timeout: raise TimeoutError
-                receiver.data = resp[0]
-                if self.is_good_response( receiver.data, flacks_to_checking):
+                self.sockett.data = resp[0]
+                if self.is_good_response( self.sockett.data, flacks_to_checking):
                     if do_answer:
-                        responce = Protocol_TCP.map_flack_to_response( receiver.data ).compose()
-                        sender.send( responce )
+                        responce = Protocol_TCP.map_flack_to_response( self.sockett.data ).compose()
+                        self.sockett.send( responce )
         
-                    return receiver.data
+                    return self.sockett.data
             except TimeoutError:
                 pass
-        receiver.close()
+        self.sockett.close()
         raise ConnException(error_msg)
             
     def recv_all_windows(self, receiver, lengh, windows_size, is_ack_wait, flacks_checking):
@@ -139,6 +138,9 @@ class Conn:
         self.try_connection += 1
         logger.info(f'Trying number {self.try_connection} to reconnecting ')
 
+    def close(self):
+        ServerPortManager().free(self.address[1])
+
 class ConnException(Exception):
     pass
 
@@ -154,9 +156,8 @@ def listen(address: str) -> Conn:
     return conn
 
 def accept(conn) -> Conn:
-    socket = MySocket(conn.address)
     while True:
-        msg = socket.recv()
+        msg = conn.sockett.recv()
         demultiplexing = conn.address[1] == HeaderTCP.get( HeaderTCP.KEYW_DESTINATION, msg )
         demultiplexing &= Protocol_TCP.SYS == HeaderTCP.get( HeaderTCP.KEYW_FLACKS, msg )
         if demultiplexing: break
@@ -166,7 +167,9 @@ def accept(conn) -> Conn:
 
     header_resp = Protocol_TCP.map_flack_to_response( msg_header)
     msg = header_resp.compose()
+    temp = conn.sockett.sender_directions
     conn = Conn( conn.address, header_resp, top_try_conn= 20)
+    conn.sockett.sender_directions = (temp[0],msg_header.source_port)
     conn.inner_header_tcp.flacks = 0
     conn.inner_header_tcp.ack_number -= 1
 
@@ -186,7 +189,8 @@ def dial(address) -> Conn:
     header = Protocol_TCP.sys_wich((my_port,port))
     msg = header.compose()
     header.flacks = 0
-    conn = Conn((host,my_port), header)
+    conn = Conn(("localhost",my_port), header)
+    conn.sockett.sender_directions = (host, port)
 
     logger.info(f'socket connecting to {address}')
     print(f'socket connecting to {host}:{port}')
@@ -207,12 +211,13 @@ def dial(address) -> Conn:
 
 
 def send(conn: Conn, data: bytes) -> int:
-    sockett = MySocket( conn.address )
     conn.fraction_data(data)
     conn.compose_all_packet()
+
     if conn.windows_size == 0: conn.windows_size = 1
     _len = len(conn.list_chunk_data)
     conn.list_chunk_data = []
+    
     while any(conn.list_ack) and any(conn.list_msg):
 
         #print(conn.windows_size)
@@ -222,9 +227,9 @@ def send(conn: Conn, data: bytes) -> int:
             msg.ack_number = _len
             msg = msg.compose( msg.data )
             #print(HeaderTCP.to_str(msg))
-            sockett.send(msg)
+            conn.sockett.send(msg)
     
-        timeout, recv_list = sockett.recv_all_windows( 0, conn.windows_size)
+        timeout, recv_list = conn.sockett.recv_all_windows( 0, conn.windows_size)
         about = True
         for msg in recv_list:
             if conn.is_good_response( msg, Protocol_TCP.ACK ):
@@ -248,19 +253,18 @@ def send(conn: Conn, data: bytes) -> int:
 
             
 def recv(conn: Conn, length: int) -> bytes:
-    sockett = MySocket( conn.address )
     data_recv = []
     _len = 0
     flack = 0
 
     while True:
         while True:
-            timeout, recv_list = sockett.recv_all_windows( conn.packet_size, -1)
+            timeout, recv_list = conn.sockett.recv_all_windows( conn.packet_size, -1)
             if any(recv_list):
                 conn.try_connection = 0
                 break
             if conn.end_sys:
-                sockett.send( conn.end_sys )
+                conn.sockett.send( conn.end_sys )
             conn.try_if_cant_close()    
         
         conn.end_sys = None
@@ -273,7 +277,7 @@ def recv(conn: Conn, length: int) -> bytes:
         if any(temp):
             flack = HeaderTCP.get( HeaderTCP.KEYW_FLACKS, temp[0])
             if flack == Protocol_TCP.SYS | Protocol_TCP.ACK:
-                conn.reconnecting( sockett )
+                conn.reconnecting( conn.sockett )
                 continue
             elif not _len : 
                 _len = HeaderTCP.get( HeaderTCP.KEYW_ACK, temp[0])
@@ -294,7 +298,8 @@ def recv(conn: Conn, length: int) -> bytes:
             header_resp.windows_size = ws
             responce = header_resp.compose()
             header_resp.flacks |= Protocol_TCP.EFE
-            sockett.send( responce )
+            conn.sockett.send( responce )
+            if header_resp.flacks & Protocol_TCP.END != 0: ClientPortManager().free(conn.address[1])
         
         if _len == len(conn.dict_seqnum_responce) and _len: break
     
